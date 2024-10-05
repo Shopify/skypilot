@@ -245,7 +245,8 @@ class StrategyExecutor:
 
     def _launch(self,
                 max_retry: Optional[int] = 3,
-                raise_on_failure: bool = True) -> Optional[float]:
+                raise_on_failure: bool = True,
+                parent_controller_name = None) -> Optional[float]:
         """Implementation of launch().
 
         The function will wait until the job starts running, but will leave the
@@ -293,7 +294,9 @@ class StrategyExecutor:
                            cluster_name=self.cluster_name,
                            detach_setup=True,
                            detach_run=True,
-                           _is_launched_by_jobs_controller=True)
+                           _is_launched_by_jobs_controller=True,
+                           _controller_name=parent_controller_name,
+                           )
                 logger.info('Managed job cluster launched.')
             except (exceptions.InvalidClusterNameError,
                     exceptions.NoCloudAccessError,

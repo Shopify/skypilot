@@ -268,7 +268,11 @@ available_node_types:
             skypilot-ssh-jump: {{k8s_ssh_jump_name}}
             skypilot-user: {{ user }}
             # controller reference label
-            sanity: {{ controller_name }}
+            {% if parent_controller_name %}
+            skypilot-parent-controller: {{ parent_controller_name }}
+            {% else %}
+            no-parent-controller-flag: "true"
+            {% endif %}
             # Custom tags for the pods
             {%- for label_key, label_value in labels.items() %}
             {{ label_key }}: {{ label_value|tojson }}

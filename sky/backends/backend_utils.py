@@ -54,6 +54,7 @@ from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.serve import serve_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -2584,7 +2585,8 @@ def get_backend_from_handle(
     return backend
 
 
-def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
+# def get_task_demands_dict(task: 'task_lib.Task') -> Dict[str, float]:
+def get_task_demands_dict(task: 'task_lib.Task', controller_name: Optional[str] = None) -> Dict[str, Any]:
     """Returns the resources dict of the task.
 
     Returns:

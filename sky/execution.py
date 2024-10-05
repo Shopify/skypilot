@@ -114,6 +114,7 @@ def _execute(
     # pylint: disable=invalid-name
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
+    _parent_controller_name: Optional[str] = None,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute an entrypoint.
 
@@ -271,7 +272,8 @@ def _execute(
 
     backend.register_info(dag=dag,
                           optimize_target=optimize_target,
-                          requested_features=requested_features)
+                          requested_features=requested_features,
+                          parent_controller_name=_parent_controller_name if (_is_launched_by_jobs_controller or _is_launched_by_sky_serve_controller) else None)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
@@ -372,6 +374,7 @@ def launch(
     # pylint: disable=invalid-name
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
+    _parent_controller_name: Optional[str] = None,
     _disable_controller_check: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -483,6 +486,7 @@ def launch(
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
+        _parent_controller_name=_parent_controller_name,
     )
 
 

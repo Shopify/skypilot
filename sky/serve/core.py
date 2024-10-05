@@ -140,6 +140,7 @@ def up(
             mode='w',
     ) as controller_file:
         controller_name = serve_utils.SKY_SERVE_CONTROLLER_NAME
+
         task_config = task.to_yaml_config()
         common_utils.dump_yaml(service_file.name, task_config)
         remote_tmp_task_yaml_path = (

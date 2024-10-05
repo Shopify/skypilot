@@ -181,7 +181,9 @@ class JobsController:
         managed_job_state.set_starting(job_id=self._job_id,
                                        task_id=task_id,
                                        callback_func=callback_func)
-        remote_job_submitted_at = self._strategy_executor.launch()
+        remote_job_submitted_at = self._strategy_executor.launch(
+            _parent_controller_name=f'jobs-controller-{self._job_id}'
+        )
         assert remote_job_submitted_at is not None, remote_job_submitted_at
 
         managed_job_state.set_started(job_id=self._job_id,
