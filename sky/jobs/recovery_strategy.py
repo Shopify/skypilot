@@ -245,8 +245,7 @@ class StrategyExecutor:
 
     def _launch(self,
                 max_retry: Optional[int] = 3,
-                raise_on_failure: bool = True,
-                parent_controller_name = None) -> Optional[float]:
+                raise_on_failure: bool = True) -> Optional[float]:
         """Implementation of launch().
 
         The function will wait until the job starts running, but will leave the
@@ -288,6 +287,8 @@ class StrategyExecutor:
             retry_cnt += 1
             try:
                 usage_lib.messages.usage.set_internal()
+                # Get the parent controller name
+                parent_controller_name = global_user_state.get_current_controller_name()
                 # Detach setup, so that the setup failure can be detected
                 # by the controller process (job_status -> FAILED_SETUP).
                 sky.launch(self.dag,
@@ -295,7 +296,7 @@ class StrategyExecutor:
                            detach_setup=True,
                            detach_run=True,
                            _is_launched_by_jobs_controller=True,
-                           _controller_name=parent_controller_name,
+                           _parent_controller_name=parent_controller_name,
                            )
                 logger.info('Managed job cluster launched.')
             except (exceptions.InvalidClusterNameError,

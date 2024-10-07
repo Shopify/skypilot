@@ -159,7 +159,7 @@ def up(
             'service_name': service_name,
             'controller_log_file': controller_log_file,
             'remote_user_config_path': remote_config_yaml_path,
-            'controller_name': controller_name,
+            'parent_controller_name': controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.name,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
             **controller_utils.shared_controller_vars_to_fill(
@@ -208,6 +208,7 @@ def up(
             idle_minutes_to_autostop=idle_minutes_to_autostop,
             retry_until_up=True,
             _disable_controller_check=True,
+            _parent_controller_name=controller_utils.Controllers.SKY_SERVE_CONTROLLER.value.name,
         )
 
         style = colorama.Style

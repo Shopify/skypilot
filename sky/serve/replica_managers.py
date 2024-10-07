@@ -57,6 +57,7 @@ _MAX_NUM_LAUNCH = psutil.cpu_count() * 2
 def launch_cluster(replica_id: int,
                    task_yaml_path: str,
                    cluster_name: str,
+                   parent_controller_name: str,
                    resources_override: Optional[Dict[str, Any]] = None,
                    max_retry: int = 3) -> None:
     """Launch a sky serve replica cluster.
@@ -99,7 +100,8 @@ def launch_cluster(replica_id: int,
                        detach_setup=True,
                        detach_run=True,
                        retry_until_up=True,
-                       _is_launched_by_sky_serve_controller=True)
+                       _is_launched_by_sky_serve_controller=True,
+                       _parent_controller_name=parent_controller_name)
             logger.info(f'Replica cluster {cluster_name} launched.')
         except (exceptions.InvalidClusterNameError,
                 exceptions.NoCloudAccessError,
@@ -656,6 +658,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 log_file_name,
             ).run,
             args=(replica_id, self._task_yaml_path, cluster_name,
+                  self._service_name,  # This is the parent controller name
                   resources_override),
         )
         replica_port = _get_resources_ports(self._task_yaml_path)
