@@ -10,6 +10,8 @@
     <img alt="Documentation" src="https://readthedocs.org/projects/skypilot/badge/?version=latest">
   </a>
 
+tuandv
+
   <a href="https://github.com/skypilot-org/skypilot/releases">
     <img alt="GitHub Release" src="https://img.shields.io/github/release/skypilot-org/skypilot.svg">
   </a>
