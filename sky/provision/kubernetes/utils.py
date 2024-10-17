@@ -125,10 +125,14 @@ class GPULabelFormatter:
 def get_gke_accelerator_name(accelerator: str) -> str:
     """Returns the accelerator name for GKE clusters
 
-    Uses the format - nvidia-tesla-<accelerator>.
+    Uses the format - nvidia-tesla-<accelerator> for GPUs.
     A100-80GB, H100-80GB and L4 are an exception. They use nvidia-<accelerator>.
+    For TPUs, it uses the format tpu-<version>.
     """
-    if accelerator == 'H100':
+    if accelerator.lower().startswith('tpu'):
+        # For TPUs, return the accelerator name as is, in lowercase
+        return accelerator.lower()
+    elif accelerator == 'H100':
         # H100 is named as H100-80GB in GKE.
         accelerator = 'H100-80GB'
     if accelerator in ('A100-80GB', 'L4', 'H100-80GB', 'H100-MEGA-80GB'):
@@ -197,21 +201,28 @@ class GKELabelFormatter(GPULabelFormatter):
     """GKE label formatter
 
     GKE nodes by default are populated with `cloud.google.com/gke-accelerator`
-    label, which is used to identify the GPU type.
+    label for GPUs and `cloud.google.com/gke-tpu-accelerator` for TPUs.
     """
 
-    LABEL_KEY = 'cloud.google.com/gke-accelerator'
+    GPU_LABEL_KEY = 'cloud.google.com/gke-accelerator'
+    TPU_LABEL_KEY = 'cloud.google.com/gke-tpu-accelerator'
 
     @classmethod
-    def get_label_key(cls) -> str:
-        return cls.LABEL_KEY
+    def get_label_key(cls, accelerator: str = 'gpu') -> str:
+        if accelerator.lower().startswith('tpu'):
+            return cls.TPU_LABEL_KEY
+        return cls.GPU_LABEL_KEY
 
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
+        if accelerator.lower().startswith('tpu'):
+            return accelerator.lower()
         return get_gke_accelerator_name(accelerator)
 
     @classmethod
     def get_accelerator_from_label_value(cls, value: str) -> str:
+        if value.startswith('tpu-'):
+            return value.upper()
         if value.startswith('nvidia-tesla-'):
             return value.replace('nvidia-tesla-', '').upper()
         elif value.startswith('nvidia-'):
@@ -363,6 +374,42 @@ def detect_gpu_resource(context: Optional[str]) -> Tuple[bool, Set[str]]:
     return has_gpu, cluster_resources
 
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+@functools.lru_cache(maxsize=10)
+def detect_gpu_and_tpu_resources(context: Optional[str]) -> Tuple[bool, bool, Set[str]]:
+    """Checks if the Kubernetes cluster has nvidia.com/gpu or google.com/tpu resources.
+
+    Returns:
+        Tuple[bool, bool, Set[str]]:
+            - First bool: True if the cluster has nvidia.com/gpu resource, False otherwise.
+            - Second bool: True if the cluster has google.com/tpu resource, False otherwise.
+            - Set of all cluster resources.
+    """
+    cluster_resources: Set[str] = set()
+    nodes = get_kubernetes_nodes(context)
+
+    logger.debug(f"Detecting GPU and TPU resources in context: {context}")
+    logger.debug(f"Number of nodes found: {len(nodes)}")
+
+    for i, node in enumerate(nodes):
+        node_name = node.metadata.name
+        node_resources = set(node.status.allocatable.keys())
+        cluster_resources.update(node_resources)
+
+        logger.debug(f"Node {i+1} ({node_name}) resources: {node_resources}")
+
+    has_gpu = 'nvidia.com/gpu' in cluster_resources
+    has_tpu = 'google.com/tpu' in cluster_resources
+
+    logger.info(f"GPU detected: {has_gpu}")
+    logger.info(f"TPU detected: {has_tpu}")
+    logger.debug(f"All cluster resources: {cluster_resources}")
+
+    return has_gpu, has_tpu, cluster_resources
+
 @functools.lru_cache(maxsize=10)
 def get_kubernetes_nodes(context: Optional[str] = None) -> List[Any]:
     """Gets the kubernetes nodes in the context.
@@ -456,7 +503,7 @@ def check_instance_fits(context: Optional[str],
         # If GPUs are requested, check if GPU type is available, and if so,
         # check if CPU and memory requirements on the specific node are met.
         try:
-            gpu_label_key, gpu_label_val = get_gpu_label_key_value(
+            gpu_label_key, gpu_label_val = get_gpu_or_tpu_label_key_value(
                 context, acc_type)
         except exceptions.ResourcesUnavailableError as e:
             # If GPU not found, return empty list and error message.
@@ -489,57 +536,46 @@ def check_instance_fits(context: Optional[str],
         return fits, reason
 
 
-def get_gpu_label_key_value(context: Optional[str],
-                            acc_type: str,
-                            check_mode=False) -> Tuple[str, str]:
-    """Returns the label key and value for the given GPU type.
+def get_gpu_or_tpu_label_key_value(context: Optional[str],
+                                   acc_type: str,
+                                   check_mode=False) -> Tuple[str, str]:
+    """Returns the label key and value for the given GPU or TPU type.
 
     Args:
-        acc_type: The GPU type required by the task.
-        check_mode: If True, only checks if the cluster has GPU resources and
-            labels are setup on the cluster. acc_type is ignore does not return
-            the label key and value. Useful for checking if GPUs are configured
-            correctly on the cluster without explicitly requesting a acc_type.
+        acc_type: The accelerator type required by the task.
+        check_mode: If True, only checks if the cluster has GPU/TPU resources and
+            labels are setup on the cluster. acc_type is ignored and does not return
+            the label key and value. Useful for checking if accelerators are configured
+            correctly on the cluster without explicitly requesting an acc_type.
     Returns:
         A tuple of the label key and value. Returns empty strings if check_mode
         is True.
     Raises:
         ResourcesUnavailableError: Can be raised from the following conditions:
-            - The cluster does not have GPU resources (nvidia.com/gpu)
-            - The cluster does not have GPU labels setup correctly
-            - The cluster doesn't have any nodes with acc_type GPU
+            - The cluster does not have GPU (nvidia.com/gpu) or TPU (google.com/tpu) resources
+            - The cluster does not have GPU/TPU labels setup correctly
+            - The cluster doesn't have any nodes with acc_type accelerator
     """
-    # Check if the cluster has GPU resources
-    # TODO(romilb): This assumes the accelerator is a nvidia GPU. We
-    #  need to support TPUs and other accelerators as well.
-    # TODO(romilb): Currently, we broadly disable all GPU checks if autoscaling
-    #  is configured in config.yaml since the cluster may be scaling up from
-    #  zero nodes and may not have any GPU nodes yet. In the future, we should
-    #  support pollingthe clusters for autoscaling information, such as the
-    #  node pools configured etc.
-
     autoscaler_type = get_autoscaler_type()
     if autoscaler_type is not None:
         # If autoscaler is set in config.yaml, override the label key and value
-        # to the autoscaler's format and bypass the GPU checks.
+        # to the autoscaler's format and bypass the GPU/TPU checks.
         if check_mode:
             # If check mode is enabled and autoscaler is set, we can return
-            # early since we assume the cluster autoscaler will handle GPU
-            # node provisioning.
+            # early since we assume the cluster autoscaler will handle
+            # accelerator node provisioning.
             return '', ''
         formatter = AUTOSCALER_TO_LABEL_FORMATTER.get(autoscaler_type)
         assert formatter is not None, ('Unsupported autoscaler type:'
                                        f' {autoscaler_type}')
-        return formatter.get_label_key(), formatter.get_label_value(acc_type)
+        return formatter.get_label_key(acc_type), formatter.get_label_value(acc_type)
 
-    has_gpus, cluster_resources = detect_gpu_resource(context)
-    if has_gpus:
-        # Check if the cluster has GPU labels setup correctly
-        label_formatter, node_labels = \
-            detect_gpu_label_formatter(context)
+    has_gpu, has_tpu, cluster_resources = detect_gpu_and_tpu_resources(context)
+    if has_gpu or has_tpu:
+        # Check if the cluster has GPU/TPU labels setup correctly
+        label_formatter, node_labels = detect_gpu_label_formatter(context)
         if label_formatter is None:
-            # If none of the GPU labels from LABEL_FORMATTER_REGISTRY are
-            # detected, raise error
+            # If none of the GPU/TPU labels from LABEL_FORMATTER_REGISTRY are detected, raise error
             with ux_utils.print_exception_no_traceback():
                 supported_formats = ', '.join(
                     [f.get_label_key() for f in LABEL_FORMATTER_REGISTRY])
@@ -547,35 +583,32 @@ def get_gpu_label_key_value(context: Optional[str],
                 if env_options.Options.SHOW_DEBUG_INFO.get():
                     suffix = f' Found node labels: {node_labels}'
                 raise exceptions.ResourcesUnavailableError(
-                    'Could not detect GPU labels in Kubernetes cluster. '
-                    'If this cluster has GPUs, please ensure GPU nodes have '
+                    'Could not detect GPU/TPU labels in Kubernetes cluster. '
+                    'If this cluster has GPUs or TPUs, please ensure nodes have '
                     'node labels of either of these formats: '
                     f'{supported_formats}. Please refer to '
                     'the documentation on how to set up node labels.'
                     f'{suffix}')
+
         if label_formatter is not None:
             # Validate the label value on all nodes labels to ensure they are
             # correctly setup and will behave as expected.
             for node_name, label_list in node_labels.items():
                 for label, value in label_list:
-                    if label == label_formatter.get_label_key():
+                    if label == label_formatter.get_label_key(acc_type):
                         is_valid, reason = label_formatter.validate_label_value(
                             value)
                         if not is_valid:
                             raise exceptions.ResourcesUnavailableError(
                                 f'Node {node_name!r} in Kubernetes cluster has '
-                                f'invalid GPU label: {label}={value}. {reason}')
+                                f'invalid accelerator label: {label}={value}. {reason}')
             if check_mode:
                 # If check mode is enabled and we reached so far, we can
                 # conclude that the cluster is setup correctly and return.
                 return '', ''
-            k8s_acc_label_key = label_formatter.get_label_key()
+            k8s_acc_label_key = label_formatter.get_label_key(acc_type)
             # Search in node_labels to see if any node has the requested
-            # GPU type.
-            # Note - this only checks if the label is available on a
-            # node. It does not (and should not) check if the resource
-            # quantity is available since that is dynamic and can change
-            # during scheduling.
+            # accelerator type.
             for node_name, label_list in node_labels.items():
                 for label, value in label_list:
                     if (label == k8s_acc_label_key and
@@ -589,30 +622,30 @@ def get_gpu_label_key_value(context: Optional[str],
                     all_labels = []
                     for node_name, label_list in node_labels.items():
                         all_labels.extend(label_list)
-                    gpus_available = set(
+                    accs_available = set(
                         v for k, v in all_labels if k == k8s_acc_label_key)
-                    suffix = f' Available GPUs on the cluster: {gpus_available}'
+                    suffix = f' Available accelerators on the cluster: {accs_available}'
                 raise exceptions.ResourcesUnavailableError(
                     'Could not find any node in the Kubernetes cluster '
-                    f'with {acc_type} GPU. Please ensure at least '
-                    f'one node in the cluster has {acc_type} GPU and node '
+                    f'with {acc_type} accelerator. Please ensure at least '
+                    f'one node in the cluster has {acc_type} accelerator and node '
                     'labels are setup correctly. '
                     f'Please refer to the documentation for more. {suffix}')
     else:
-        # If GPU resources are not detected, raise error
+        # If neither GPU nor TPU resources are detected, raise error
         with ux_utils.print_exception_no_traceback():
             suffix = ''
             if env_options.Options.SHOW_DEBUG_INFO.get():
                 suffix = (' Available resources on the cluster: '
                           f'{cluster_resources}')
             raise exceptions.ResourcesUnavailableError(
-                'Could not detect GPU resources (`nvidia.com/gpu`) in '
-                'Kubernetes cluster. If this cluster contains GPUs, please '
-                'ensure GPU drivers are installed on the node. Check if the '
-                'GPUs are setup correctly by running `kubectl describe nodes` '
-                'and looking for the nvidia.com/gpu resource. '
+                'Could not detect GPU (`nvidia.com/gpu`) or TPU (`google.com/tpu`) resources in '
+                'Kubernetes cluster. If this cluster contains GPUs or TPUs, please '
+                'ensure drivers are installed on the nodes. Check if the '
+                'GPUs/TPUs are setup correctly by running `kubectl describe nodes` '
+                'and looking for the nvidia.com/gpu or google.com/tpu resources. '
                 'Please refer to the documentation on how '
-                f'to set up GPUs.{suffix}')
+                f'to set up GPUs or TPUs.{suffix}')
 
 
 def get_head_ssh_port(cluster_name: str, namespace: str,
@@ -707,7 +740,7 @@ def check_credentials(context: Optional[str],
     # provider if their cluster GPUs are not setup correctly.
     gpu_msg = ''
     try:
-        _, _ = get_gpu_label_key_value(context, acc_type='', check_mode=True)
+        _, _ = get_gpu_or_tpu_label_key_value(context, acc_type='', check_mode=True)
     except exceptions.ResourcesUnavailableError as e:
         # If GPUs are not available, we return cluster as enabled (since it can
         # be a CPU-only cluster) but we also return the exception message which

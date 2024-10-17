@@ -366,10 +366,10 @@ class Kubernetes(clouds.Cloud):
         k8s_acc_label_key = None
         k8s_acc_label_value = None
 
-        # If GPUs are requested, set node label to match the GPU type.
+        # If accelerators are requested, set node label to match the accelerator type.
         if acc_count > 0 and acc_type is not None:
             k8s_acc_label_key, k8s_acc_label_value = \
-                kubernetes_utils.get_gpu_label_key_value(context, acc_type)
+                kubernetes_utils.get_gpu_or_tpu_label_key_value(context, acc_type)
 
         port_mode = network_utils.get_port_mode(None)
 
@@ -488,21 +488,21 @@ class Kubernetes(clouds.Cloud):
             chosen_instance_type = default_instance_type
         else:
             assert len(accelerators) == 1, resources
-            # GPUs requested - build instance type.
+            # Accelerators (GPU or TPU) requested - build instance type.
             acc_type, acc_count = list(accelerators.items())[0]
 
             # Parse into KubernetesInstanceType
             k8s_instance_type = (kubernetes_utils.KubernetesInstanceType.
                                  from_instance_type(default_instance_type))
 
-            gpu_task_cpus = k8s_instance_type.cpus
-            # Special handling to bump up memory multiplier for GPU instances
-            gpu_task_memory = (float(resources.memory.strip('+')) if
-                               resources.memory is not None else gpu_task_cpus *
+            acc_task_cpus = k8s_instance_type.cpus
+            # Special handling to bump up memory multiplier for accelerator instances
+            acc_task_memory = (float(resources.memory.strip('+')) if
+                               resources.memory is not None else acc_task_cpus *
                                self._DEFAULT_MEMORY_CPU_RATIO_WITH_GPU)
             chosen_instance_type = (
                 kubernetes_utils.KubernetesInstanceType.from_resources(
-                    gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name)
+                    acc_task_cpus, acc_task_memory, acc_count, acc_type).name)
 
         # Check the availability of the specified instance type in all contexts.
         available_regions = self.regions_with_offering(

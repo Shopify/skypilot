@@ -262,11 +262,13 @@ available_node_types:
         # service is required.
         labels:
             parent: skypilot
-            # component will be set for the head node pod to be the same as the head node service selector above if a 
+            # component will be set for the head node pod to be the same as the head node service selector above if a
             skypilot-cluster: {{cluster_name_on_cloud}}
             # Identifies the SSH jump pod used by this pod. Used in life cycle management of the ssh jump pod.
             skypilot-ssh-jump: {{k8s_ssh_jump_name}}
             skypilot-user: {{ user }}
+            # controller reference label
+            sanity: {{ controller_name }}
             # Custom tags for the pods
             {%- for label_key, label_value in labels.items() %}
             {{ label_key }}: {{ label_value|tojson }}
@@ -288,6 +290,11 @@ available_node_types:
         nodeSelector:
             {% if k8s_acc_label_key is not none and k8s_acc_label_value is not none %}
             {{k8s_acc_label_key}}: {{k8s_acc_label_value}}
+            # {% if 'tpu' in k8s_acc_label_value|lower %}
+            # cloud.google.com/gke-accelerator-count: "{{accelerator_count}}"
+            # cloud.google.com/gke-tpu-topology: "{{tpu_topology}}"
+            # cloud.google.com/machine-family: "{{machine_family}}"
+            # {% endif %}
             {% endif %}
             {% if k8s_spot_label_key is not none %}
             {{k8s_spot_label_key}}: {{k8s_spot_label_value|tojson}}
@@ -322,7 +329,7 @@ available_node_types:
           # Do not change this command - it keeps the pod alive until it is
           # explicitly killed.
           command: ["/bin/bash", "-c", "--"]
-          args: 
+          args:
             - |
               # Tails file and checks every 5 sec for
               # open file handlers with write access
@@ -360,7 +367,7 @@ available_node_types:
                       # File is already being monitored
                       continue
                     fi
-                    
+
                     # Monitor the new file
                     monitor_file $file &
                     already_monitored="${already_monitored} ${file}"
@@ -398,14 +405,26 @@ available_node_types:
             requests:
               cpu: {{cpus}}
               memory: {{memory}}G
+              {% if k8s_acc_label_key and k8s_acc_label_value %}
+              {% if 'tpu' in k8s_acc_label_value.lower() %}
+              google.com/tpu: {{accelerator_count}}
+              {% else %}
               nvidia.com/gpu: {{accelerator_count}}
+              {% endif %}
+              {% endif %}
               {% if k8s_fuse_device_required %}
               # Kubernetes resource exposed by the fuse device manager
               # https://gitlab.com/arm-research/smarter/smarter-device-manager
               smarter-devices/fuse: "1"
               {% endif %}
             limits:
-              nvidia.com/gpu: {{accelerator_count}} # Limits need to be defined for GPU requests
+              {% if k8s_acc_label_key and k8s_acc_label_value %}
+              {% if 'tpu' in k8s_acc_label_value.lower() %}
+              google.com/tpu: {{accelerator_count}}
+              {% else %}
+              nvidia.com/gpu: {{accelerator_count}}
+              {% endif %}
+              {% endif %}
               {% if k8s_fuse_device_required %}
               smarter-devices/fuse: "1"
               {% endif %}

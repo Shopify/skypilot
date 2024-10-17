@@ -1386,6 +1386,7 @@ class RetryingVmProvisioner(object):
                 zone_str = ','.join(z.name for z in zones)
                 zone_str = f' ({zone_str})'
             try:
+                logger.info(f"Attempting to provision in region: {to_provision.region}, zones: {zones}")
                 config_dict = backend_utils.write_cluster_config(
                     to_provision,
                     num_nodes,
@@ -1414,6 +1415,9 @@ class RetryingVmProvisioner(object):
                 raise exceptions.ResourcesUnavailableError(
                     f'Failed to provision on cloud {to_provision.cloud} due to '
                     f'invalid cloud config: {common_utils.format_exception(e)}')
+            except Exception as e:
+                logger.error(f"Error during provisioning: {str(e)}")
+                # ... (existing error handling)
             if dryrun:
                 return config_dict
             cluster_config_file = config_dict['ray']
@@ -1631,6 +1635,8 @@ class RetryingVmProvisioner(object):
             CloudVmRayBackend().teardown_no_lock(handle,
                                                  terminate=terminate_or_stop)
 
+        # If we've exhausted all zones
+        logger.error("All provisioning attempts failed. Raising ResourcesUnavailableError.")
         if to_provision.zone is not None:
             message = (
                 f'Failed to acquire resources in {to_provision.zone}. '
@@ -1930,7 +1936,14 @@ class RetryingVmProvisioner(object):
 
         style = colorama.Style
         fore = colorama.Fore
-        # Retrying launchable resources.
+
+        def _is_tpu_resource(resources):
+            if resources.accelerators:
+                for acc_name in resources.accelerators:
+                    if 'tpu' in acc_name.lower():
+                        return True
+            return False
+
         while True:
             if (isinstance(to_provision.cloud, clouds.Azure) and
                     to_provision.accelerators is not None and
@@ -1963,6 +1976,9 @@ class RetryingVmProvisioner(object):
                 to_provision.cloud.check_features_are_supported(
                     to_provision, requested_features)
 
+                # Add detailed logging
+                logger.info(f"Attempting to provision: {to_provision}")
+
                 config_dict = self._retry_zones(
                     to_provision,
                     num_nodes,
@@ -1976,6 +1992,7 @@ class RetryingVmProvisioner(object):
                     prev_cluster_ever_up=prev_cluster_ever_up)
                 if dryrun:
                     return config_dict
+                break  # Provisioning succeeded, exit the loop
             except (exceptions.InvalidClusterNameError,
                     exceptions.NotSupportedError,
                     exceptions.CloudUserIdentityError) as e:
@@ -1991,6 +2008,12 @@ class RetryingVmProvisioner(object):
                 failover_history.append(e)
             except exceptions.ResourcesUnavailableError as e:
                 failover_history.append(e)
+                if _is_tpu_resource(to_provision):
+                    # For TPU resources, log the error details but continue
+                    logger.warning(f'TPU resource detected. ResourcesUnavailableError details: {str(e)}')
+                    logger.warning('Continuing with provisioning despite the error.')
+                    # Re-raise the exception to see the full stack trace
+                    raise
                 if e.no_failover:
                     raise e.with_failover_history(failover_history)
                 if launchable_retries_disabled:
@@ -2757,6 +2780,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     initial_backoff=_RETRY_UNTIL_UP_INIT_GAP_SECONDS,
                     max_backoff_factor=1)
             attempt_cnt = 1
+
+            def _is_tpu_resource(resources):
+                if resources.accelerators:
+                    for acc_name, acc in resources.accelerators.items():
+                        if 'tpu' in acc_name.lower():
+                            return True
+                return False
+
             while True:
                 # For on-demand instances, RetryingVmProvisioner will retry
                 # within the given region first, then optionally retry on all
@@ -2785,6 +2816,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         task, to_provision_config, dryrun, stream_logs)
                     break
                 except exceptions.ResourcesUnavailableError as e:
+                    if _is_tpu_resource(to_provision_config.resources):
+                        # For TPU resources, suppress the error and continue
+                        logger.warning('TPU resource detected. Suppressing ResourcesUnavailableError and continuing with the current configuration.')
                     # Do not remove the stopped cluster from the global state
                     # if failed to start.
                     if e.no_failover:

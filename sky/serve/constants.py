@@ -93,3 +93,6 @@ REPLICA_ID_ENV_VAR = 'SKYPILOT_SERVE_REPLICA_ID'
 # the user can be notified to update their SkyPilot serve version on the remote
 # cluster.
 SERVE_VERSION = 1
+
+# Label key for identifying the controller managing a service pod
+CONTROLLER_LABEL_KEY = 'sky-serve-controller'

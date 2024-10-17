@@ -563,20 +563,23 @@ class Resources:
             }
 
             acc, _ = list(accelerators.items())[0]
+            logger.info(f'Accelerators: {accelerators}')
             if 'tpu' in acc.lower():
                 if self.cloud is None:
                     self._cloud = clouds.GCP()
-                assert self.cloud.is_same_cloud(
-                    clouds.GCP()), 'Cloud must be GCP.'
+                assert self.cloud.is_same_cloud(clouds.GCP()) or self.cloud.is_same_cloud(clouds.Kubernetes()), 'Cloud must be GCP or Kubernetes.'
                 if accelerator_args is None:
                     accelerator_args = {}
                 use_tpu_vm = accelerator_args.get('tpu_vm', True)
                 if self.instance_type is not None and use_tpu_vm:
-                    if self.instance_type != 'TPU-VM':
-                        with ux_utils.print_exception_no_traceback():
-                            raise ValueError(
-                                'Cannot specify instance type'
-                                f' (got "{self.instance_type}") for TPU VM.')
+                    if self.cloud.is_same_cloud(clouds.GCP()):
+                        if self.instance_type != 'TPU-VM':
+                            with ux_utils.print_exception_no_traceback():
+                                raise ValueError(
+                                    'Cannot specify instance type'
+                                    f' (got "{self.instance_type}") for TPU VM on GCP.')
+                    else:  # Kubernetes
+                        logger.info(f'Using instance type "{self.instance_type}" for TPU on Kubernetes.')
                 if 'runtime_version' not in accelerator_args:
 
                     def _get_default_runtime_version() -> str:
@@ -585,6 +588,9 @@ class Resources:
                         # TPU V5 requires a newer runtime version.
                         if acc.startswith('tpu-v5'):
                             return 'v2-alpha-tpuv5'
+                        # TPU V6e requires a specific runtime version.
+                        if acc.startswith('tpu-v6e'):
+                            return 'v2-alpha-tpuv6e'
                         return 'tpu-vm-base'
 
                     accelerator_args['runtime_version'] = (
