@@ -290,6 +290,11 @@ available_node_types:
         nodeSelector:
             {% if k8s_acc_label_key is not none and k8s_acc_label_value is not none %}
             {{k8s_acc_label_key}}: {{k8s_acc_label_value}}
+            # {% if 'tpu' in k8s_acc_label_value|lower %}
+            # cloud.google.com/gke-accelerator-count: "{{accelerator_count}}"
+            # cloud.google.com/gke-tpu-topology: "{{tpu_topology}}"
+            # cloud.google.com/machine-family: "{{machine_family}}"
+            # {% endif %}
             {% endif %}
             {% if k8s_spot_label_key is not none %}
             {{k8s_spot_label_key}}: {{k8s_spot_label_value|tojson}}
@@ -400,14 +405,26 @@ available_node_types:
             requests:
               cpu: {{cpus}}
               memory: {{memory}}G
+              {% if k8s_acc_label_key and k8s_acc_label_value %}
+              {% if 'tpu' in k8s_acc_label_value.lower() %}
+              google.com/tpu: {{accelerator_count}}
+              {% else %}
               nvidia.com/gpu: {{accelerator_count}}
+              {% endif %}
+              {% endif %}
               {% if k8s_fuse_device_required %}
               # Kubernetes resource exposed by the fuse device manager
               # https://gitlab.com/arm-research/smarter/smarter-device-manager
               smarter-devices/fuse: "1"
               {% endif %}
             limits:
-              nvidia.com/gpu: {{accelerator_count}} # Limits need to be defined for GPU requests
+              {% if k8s_acc_label_key and k8s_acc_label_value %}
+              {% if 'tpu' in k8s_acc_label_value.lower() %}
+              google.com/tpu: {{accelerator_count}}
+              {% else %}
+              nvidia.com/gpu: {{accelerator_count}}
+              {% endif %}
+              {% endif %}
               {% if k8s_fuse_device_required %}
               smarter-devices/fuse: "1"
               {% endif %}

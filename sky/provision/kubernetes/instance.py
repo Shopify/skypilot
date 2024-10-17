@@ -498,10 +498,51 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                        'override runtimeClassName in ~/.sky/config.yaml. '
                        'For more details, refer to https://skypilot.readthedocs.io/en/latest/reference/config.html')  # pylint: disable=line-too-long
 
-    needs_gpus = (pod_spec['spec']['containers'][0].get('resources', {}).get(
-        'limits', {}).get('nvidia.com/gpu', 0) > 0)
+    # resources = pod_spec['spec']['containers'][0].get('resources', {}).get('limits', {})
+    # needs_gpus = resources.get('nvidia.com/gpu', 0) > 0
+    # needs_tpus = any(key.startswith('cloud.google.com/gke-tpu-') for key in resources)
+    resources = pod_spec['spec']['containers'][0].get('resources', {})
+    needs_gpus = 'nvidia.com/gpu' in resources.get('limits', {})
+    needs_tpus = 'google.com/tpu' in resources.get('limits', {})
+
     if nvidia_runtime_exists and needs_gpus:
         pod_spec['spec']['runtimeClassName'] = 'nvidia'
+
+    if needs_tpus:
+        tpu_tolerations = [
+            {
+                'effect': 'NoSchedule',
+                'key': 'google.com/tpu',
+                'operator': 'Equal',
+                'value': 'present'
+            },
+            {
+                'effect': 'NoSchedule',
+                'key': 'google.com/tpu',
+                'operator': 'Exists'
+            }
+        ]
+        pod_spec['spec'].setdefault('tolerations', []).extend(tpu_tolerations)
+
+        # Ensure TPU resource requests match limits
+        tpu_count = resources['limits']['google.com/tpu']
+        resources.setdefault('requests', {})['google.com/tpu'] = tpu_count
+
+        # Set default CPU and memory requests if not specified
+        if 'cpu' not in resources.get('requests', {}):
+            resources.setdefault('requests', {})['cpu'] = '1'
+        if 'memory' not in resources.get('requests', {}):
+            resources.setdefault('requests', {})['memory'] = '1Gi'
+
+        # Add TPU-specific node selector labels
+        pod_spec['spec'].setdefault('nodeSelector', {}).update({
+            'cloud.google.com/gke-accelerator-count': str(config.accelerator_count),
+            'cloud.google.com/gke-tpu-topology': config.tpu_topology,
+            'cloud.google.com/machine-family': config.machine_family,
+        })
+
+    # Update the pod spec with the modified resources
+    pod_spec['spec']['containers'][0]['resources'] = resources
 
     created_pods = {}
     logger.debug(f'run_instances: calling create_namespaced_pod '
