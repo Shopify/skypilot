@@ -1044,7 +1044,7 @@ def get_kube_config_context_namespace(
         str | None: The current kubernetes context namespace if it exists, else
             the default namespace.
     """
-    return "kueue-job-staging"
+    return "kueue-jobs-staging"
     k8s = kubernetes.kubernetes
     # Get namespace if using in-cluster config
     ns_path = '/var/run/secrets/kubernetes.io/serviceaccount/namespace'
